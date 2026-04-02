@@ -301,6 +301,123 @@ if "current_page" not in st.session_state:
 if "result" not in st.session_state:
     st.session_state.result = None
 
+# Career domain → CSV (all under dataset/; CS/AI mirrors the original root CSV)
+DOMAIN_AUTO = "Auto (best domain for your skills)"
+CAREER_FIELD_FILES = {
+    "Computer Science & AI": "dataset/computer_science_ai.csv",
+    "Mechanical Engineering": "dataset/mechanical_engineering.csv",
+    "Civil Engineering": "dataset/civil_engineering.csv",
+    "Electrical Engineering": "dataset/electrical_engineering.csv",
+    "Electronics & Communication Engineering": "dataset/electronics_communication_engineering.csv",
+    "Textile": "dataset/textile.csv",
+    "Medicine": "dataset/medicine.csv",
+    "Finance": "dataset/finance.csv",
+}
+CAREER_DOMAINS_ORDERED = list(CAREER_FIELD_FILES.keys())
+
+# When cosine scores tie across domains, prefer specialist industries over CS (avoids "always CSE")
+AUTO_DOMAIN_TIEBREAK = {
+    "Civil Engineering": 8,
+    "Mechanical Engineering": 7,
+    "Electrical Engineering": 6,
+    "Electronics & Communication Engineering": 5,
+    "Textile": 4,
+    "Medicine": 3,
+    "Finance": 2,
+    "Computer Science & AI": 1,
+}
+
+if "career_field" not in st.session_state:
+    st.session_state.career_field = DOMAIN_AUTO
+elif st.session_state.career_field not in [DOMAIN_AUTO] + CAREER_DOMAINS_ORDERED:
+    st.session_state.career_field = DOMAIN_AUTO
+
+# Base salary anchors per domain (same role-meaning as original CS block)
+CAREER_BASE_SALARY = {
+    "Computer Science & AI": {
+        "AI Engineer": 8, "ML Engineer": 6, "Data Scientist": 4,
+        "Data Analyst": 3, "Frontend Developer": 3, "Backend Developer": 3,
+        "Full Stack Developer": 6, "DevOps Engineer": 6,
+    },
+    "Mechanical Engineering": {
+        "Design Engineer": 6, "Manufacturing Engineer": 5, "Quality Engineer": 5,
+        "HVAC Engineer": 6, "Maintenance Engineer": 4, "Robotics Automation Engineer": 7,
+        "Project Engineer": 6, "CAE Engineer": 7,
+    },
+    "Civil Engineering": {
+        "Structural Engineer": 7, "Site Engineer": 4, "Quantity Surveyor": 5,
+        "Geotechnical Engineer": 6, "Highway Engineer": 5, "BIM Civil Engineer": 6,
+        "Project Manager Civil": 7, "Urban Planner": 5,
+    },
+    "Electrical Engineering": {
+        "Power Systems Engineer": 7, "Control Systems Engineer": 6, "Electrical Design Engineer": 6,
+        "Substation Engineer": 7, "Renewable Energy Engineer": 6, "Electrical Maintenance Engineer": 4,
+        "Electrical Project Engineer": 6, "Protection Engineer": 7,
+    },
+    "Electronics & Communication Engineering": {
+        "VLSI Design Engineer": 8, "Embedded Systems Engineer": 7, "RF Engineer": 7,
+        "Analog Design Engineer": 8, "PCB Design Engineer": 6, "Hardware Test Engineer": 5,
+        "DSP Engineer": 7, "Telecom Network Engineer": 6,
+    },
+    "Textile": {
+        "Textile Technologist": 4, "Fabric Development Specialist": 5,
+        "Quality Control Textile": 4, "Fashion Production Manager": 6,
+        "Knitting Engineer": 5, "Dyeing Technologist": 5,
+        "Merchandiser": 4, "Supply Chain Textile": 5,
+    },
+    "Medicine": {
+        "General Physician": 8, "Surgeon": 9, "Pediatrician": 8,
+        "Radiologist": 8, "Pathologist": 7, "Emergency Medicine Doctor": 8,
+        "Psychiatrist": 7, "Cardiologist": 9,
+    },
+    "Finance": {
+        "Financial Analyst": 5, "Investment Banker": 8, "Chartered Accountant": 7,
+        "Risk Analyst": 6, "Portfolio Manager": 8, "Financial Controller": 7,
+        "Tax Consultant": 6, "Credit Analyst": 5,
+    },
+}
+
+ROLE_LINE_COLORS = {
+    "AI Engineer": "#a78bfa", "ML Engineer": "#60a5fa", "Data Scientist": "#34d399",
+    "Full Stack Developer": "#f87171", "Backend Developer": "#fbbf24",
+    "Data Analyst": "#fb923c", "Frontend Developer": "#e879f9", "DevOps Engineer": "#38bdf8",
+    "Design Engineer": "#fb7185", "Manufacturing Engineer": "#f97316", "Quality Engineer": "#eab308",
+    "HVAC Engineer": "#22d3ee", "Maintenance Engineer": "#a3e635", "Robotics Automation Engineer": "#c084fc",
+    "Project Engineer": "#f472b6", "CAE Engineer": "#2dd4bf",
+    "Structural Engineer": "#fcd34d", "Site Engineer": "#78716c", "Quantity Surveyor": "#0ea5e9",
+    "Geotechnical Engineer": "#84cc16", "Highway Engineer": "#f59e0b", "BIM Civil Engineer": "#06b6d4",
+    "Project Manager Civil": "#8b5cf6", "Urban Planner": "#10b981",
+    "Power Systems Engineer": "#fde047", "Control Systems Engineer": "#facc15",
+    "Electrical Design Engineer": "#eab308", "Substation Engineer": "#ca8a04",
+    "Renewable Energy Engineer": "#84cc16", "Electrical Maintenance Engineer": "#65a30d",
+    "Electrical Project Engineer": "#4d7c0f", "Protection Engineer": "#365314",
+    "VLSI Design Engineer": "#38bdf8", "Embedded Systems Engineer": "#0ea5e9",
+    "RF Engineer": "#0284c7", "Analog Design Engineer": "#0369a1",
+    "PCB Design Engineer": "#075985", "Hardware Test Engineer": "#0c4a6e",
+    "DSP Engineer": "#22d3ee", "Telecom Network Engineer": "#06b6d4",
+    "Textile Technologist": "#d946ef", "Fabric Development Specialist": "#ec4899",
+    "Quality Control Textile": "#f43f5e", "Fashion Production Manager": "#db2777",
+    "Knitting Engineer": "#e11d48", "Dyeing Technologist": "#be185d", "Merchandiser": "#9d174d",
+    "Supply Chain Textile": "#831843",
+    "General Physician": "#34d399", "Surgeon": "#10b981", "Pediatrician": "#6ee7b7",
+    "Radiologist": "#14b8a6", "Pathologist": "#2dd4bf", "Emergency Medicine Doctor": "#059669",
+    "Psychiatrist": "#047857", "Cardiologist": "#065f46",
+    "Financial Analyst": "#60a5fa", "Investment Banker": "#3b82f6", "Chartered Accountant": "#2563eb",
+    "Risk Analyst": "#1d4ed8", "Portfolio Manager": "#1e40af", "Financial Controller": "#1e3a8a",
+    "Tax Consultant": "#93c5fd", "Credit Analyst": "#bfdbfe",
+}
+
+
+def effective_training_domain():
+    """Dataset to train/load: chosen domain, or domain inferred from last match (Auto), or CS as idle default."""
+    if st.session_state.career_field == DOMAIN_AUTO:
+        res = st.session_state.result
+        if res and res.get("career_field"):
+            return res["career_field"]
+        return "Computer Science & AI"
+    return st.session_state.career_field
+
+
 def add_skill(skill):
     current = [s.strip() for s in st.session_state.skills_input.split(',') if s.strip()]
     if skill not in current:
@@ -566,8 +683,9 @@ def generate_roadmap(missing, user_set):
 # LOAD & TRAIN
 # ==============================
 @st.cache_resource
-def load_and_train():
-    df = pd.read_csv("cleaned_synthetic_jobs_20k copy.csv")
+def load_and_train(career_field="Computer Science & AI"):
+    csv_path = CAREER_FIELD_FILES.get(career_field, CAREER_FIELD_FILES["Computer Science & AI"])
+    df = pd.read_csv(csv_path)
     df.rename(columns={
         "Job_Name": "job_title", "Required_Skills": "skills_required",
         "User_Learned_Skills": "user_skills", "Avg_Salary_LPA": "salary",
@@ -588,13 +706,12 @@ def load_and_train():
         for i in range(len(df))
     ]
 
-    base_salary = {
-        "AI Engineer": 8, "ML Engineer": 6, "Data Scientist": 4,
-        "Data Analyst": 3, "Frontend Developer": 3, "Backend Developer": 3,
-        "Full Stack Developer": 6, "DevOps Engineer": 6
-    }
+    base_salary = CAREER_BASE_SALARY.get(
+        career_field, CAREER_BASE_SALARY["Computer Science & AI"]
+    )
+    default_base = 8 if career_field == "Computer Science & AI" else 6
     df['salary'] = [
-        base_salary.get(df['job_title'].iloc[i], 8) +
+        base_salary.get(df['job_title'].iloc[i], default_base) +
         df['similarity'].iloc[i] * 15 + random.uniform(-0.5, 0.5)
         for i in range(len(df))
     ]
@@ -629,7 +746,7 @@ def load_and_train():
     return df, tfidf, le, salary_model, X, accuracy, y_test_actual_eval, y_pred_actual_eval, req_matrix
 
 
-def forecast_postings(df, best_job):
+def forecast_postings(df, best_job, career_field="Computer Science & AI"):
     job_yearly = df[df['job_title'] == best_job].groupby('year')['postings'].mean().reset_index()
     job_yearly = job_yearly.sort_values('year').reset_index(drop=True)
     job_yearly['postings'] = job_yearly['postings'].round().astype(int)
@@ -638,7 +755,21 @@ def forecast_postings(df, best_job):
     base      = job_yearly['postings'].values
     job_lower = best_job.lower()
 
-    if "ai" in job_lower or "machine learning" in job_lower or "data scientist" in job_lower:
+    if career_field == "Medicine":
+        trend = np.linspace(0, 75, len(base))
+    elif career_field == "Finance":
+        trend = np.linspace(0, 40, len(base))
+    elif career_field == "Civil Engineering":
+        trend = np.linspace(0, 32, len(base))
+    elif career_field == "Mechanical Engineering":
+        trend = np.linspace(0, 28, len(base))
+    elif career_field == "Electrical Engineering":
+        trend = np.linspace(0, 30, len(base))
+    elif career_field == "Electronics & Communication Engineering":
+        trend = np.linspace(0, 35, len(base))
+    elif career_field == "Textile":
+        trend = np.linspace(0, -12, len(base))
+    elif "ai" in job_lower or "machine learning" in job_lower or "data scientist" in job_lower:
         trend = np.linspace(0, 80, len(base))
     elif "backend" in job_lower or "frontend" in job_lower or "web" in job_lower:
         trend = np.linspace(0, 10, len(base))
@@ -785,15 +916,10 @@ def generate_pdf(best_job, best_sim, pred_salary, user_set, req_set, missing,
 def market_trend_chart(df, best_job):
     trend = df.groupby(['year','job_title'])['salary'].mean().reset_index()
     fig, ax = dark_fig(figsize=(10, 4))
-    colors_map = {
-        'AI Researcher':'#a78bfa','ML Engineer':'#60a5fa','Data Scientist':'#34d399',
-        'Full Stack Developer':'#f87171','Backend Developer':'#fbbf24',
-        'Data Analyst':'#fb923c','Frontend Developer':'#e879f9','DevOps Engineer':'#38bdf8',
-    }
     for job in trend['job_title'].unique():
         job_data = trend[trend['job_title'] == job].sort_values('year')
         ax.plot(job_data['year'], job_data['salary'], label=job,
-                color=colors_map.get(job,'#ffffff'),
+                color=ROLE_LINE_COLORS.get(job, '#e2e8f0'),
                 linewidth=3.5 if job == best_job else 1.5,
                 alpha=1.0 if job == best_job else 0.4,
                 marker='o' if job == best_job else None,
@@ -810,6 +936,42 @@ def market_trend_chart(df, best_job):
 # ==============================
 # TOP NAVIGATION BAR
 # ==============================
+CAREER_SKILL_PLACEHOLDERS = {
+    DOMAIN_AUTO: "e.g. python, solidworks, staad pro, gst, diagnosis — skills from any domain",
+    "Computer Science & AI": "e.g. python, machine learning, sql, docker",
+    "Mechanical Engineering": "e.g. solidworks, cad, fea, lean six sigma, plc",
+    "Civil Engineering": "e.g. revit, staad pro, estimation, site supervision, gis",
+    "Electrical Engineering": "e.g. plc, scada, power systems, relay coordination, autocad electrical",
+    "Electronics & Communication Engineering": "e.g. verilog, embedded, rf, pcb design, dsp, lte",
+    "Textile": "e.g. weaving, dyeing chemistry, fabric testing, merchandising, sap pp",
+    "Medicine": "e.g. clinical examination, diagnosis, emr, patient care, triage",
+    "Finance": "e.g. financial modeling, excel, valuation, gst, risk analysis",
+}
+
+
+def skills_input_placeholder():
+    cf = st.session_state.career_field
+    if cf == DOMAIN_AUTO:
+        return CAREER_SKILL_PLACEHOLDERS[DOMAIN_AUTO]
+    return CAREER_SKILL_PLACEHOLDERS.get(cf, CAREER_SKILL_PLACEHOLDERS["Computer Science & AI"])
+
+
+def render_career_domain_bar():
+    fields = [DOMAIN_AUTO] + CAREER_DOMAINS_ORDERED
+    idx = fields.index(st.session_state.career_field) if st.session_state.career_field in fields else 0
+    choice = st.selectbox(
+        "Career domain",
+        fields,
+        index=idx,
+        help="Auto: compares your skills against every domain and uses the strongest match. "
+        "Or lock one domain to search only that industry.",
+    )
+    if choice != st.session_state.career_field:
+        st.session_state.career_field = choice
+        st.session_state.result = None
+        st.rerun()
+
+
 def render_topnav(active_page):
     pages = ["Dashboard", "Salary Prediction", "Job Forecasting", "Market Trends", "About"]
     icons = ["🏠", "💰", "📈", "📊", "ℹ️"]
@@ -927,7 +1089,7 @@ def page_dashboard(df, salary_accuracy):
         user_input = st.text_input(
             "🧠 Enter Your Skills (comma separated)",
             value=st.session_state.skills_input,
-            placeholder="e.g. python, machine learning, sql, docker",
+            placeholder=skills_input_placeholder(),
             key="dash_skills"
         )
         st.session_state.skills_input = user_input
@@ -945,18 +1107,41 @@ def page_dashboard(df, salary_accuracy):
 # ==============================
 # SHARED PREDICTION LOGIC
 # ==============================
-def _run_prediction(user_input, year, df, tfidf=None, le=None, salary_model=None,
+def _run_prediction(user_input, year, df=None, tfidf=None, le=None, salary_model=None,
                     X_cols=None, req_matrix=None, return_page="Salary Prediction"):
-    if tfidf is None:
-        df, tfidf, le, salary_model, X_cols, _, _, _, req_matrix = load_and_train()
+    user_input_clean = standardize_skills(normalize_text(user_input))
 
-    with st.spinner("🔍 Finding best job match..."):
-        user_input_clean = standardize_skills(normalize_text(user_input))
-        user_vec         = tfidf.transform([user_input_clean])
-        all_sims         = cosine_similarity(user_vec, req_matrix).flatten()
-        best_idx         = int(np.argmax(all_sims))
-        best_sim         = float(all_sims[best_idx])
-        best_job         = df['job_title'].iloc[best_idx]
+    with st.spinner("🔍 Finding best job match across domains..." if st.session_state.career_field == DOMAIN_AUTO else "🔍 Finding best job match..."):
+        if st.session_state.career_field == DOMAIN_AUTO:
+            best_key = None
+            best_pack = None
+            for domain in CAREER_DOMAINS_ORDERED:
+                d_df, d_tfidf, d_le, d_model, d_X, _, _, _, d_req = load_and_train(domain)
+                user_vec = d_tfidf.transform([user_input_clean])
+                sims = cosine_similarity(user_vec, d_req).flatten()
+                bi = int(np.argmax(sims))
+                bs = float(sims[bi])
+                tie = AUTO_DOMAIN_TIEBREAK.get(domain, 0)
+                key = (bs, tie)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_pack = (domain, bi, d_df, d_tfidf, d_le, d_model, d_X, d_req)
+            if best_pack is None:
+                st.session_state['result'] = None
+                st.error("❌ Could not load career datasets.")
+                return
+            matched_domain, best_idx, df, tfidf, le, salary_model, X_cols, req_matrix = best_pack
+            best_sim = float(best_key[0])
+            best_job = df['job_title'].iloc[best_idx]
+        else:
+            matched_domain = st.session_state.career_field
+            if tfidf is None:
+                df, tfidf, le, salary_model, X_cols, _, _, _, req_matrix = load_and_train(matched_domain)
+            user_vec = tfidf.transform([user_input_clean])
+            all_sims = cosine_similarity(user_vec, req_matrix).flatten()
+            best_idx = int(np.argmax(all_sims))
+            best_sim = float(all_sims[best_idx])
+            best_job = df['job_title'].iloc[best_idx]
 
         all_req_skills = set()
         for row in df[df['job_title'] == best_job]['skills_required']:
@@ -965,7 +1150,10 @@ def _run_prediction(user_input, year, df, tfidf=None, le=None, salary_model=None
 
     if best_sim < 0.2:
         st.session_state['result'] = None
-        st.error("❌ No matching skills found. Please enter relevant tech skills.")
+        st.error(
+            "❌ No strong skill match in any career domain. "
+            "Try clearer, role-specific skills (e.g. stack for tech, cad/fea for mechanical)."
+        )
         return
 
     job_encoded = le.transform([best_job])[0]
@@ -977,14 +1165,15 @@ def _run_prediction(user_input, year, df, tfidf=None, le=None, salary_model=None
     user_set    = clean_split(user_input_clean)
 
     st.session_state['result'] = {
-        'best_job':    best_job,
-        'best_sim':    best_sim,
-        'pred_salary': pred_salary,
-        'user_set':    user_set,
-        'req_set':     all_req_skills,
-        'missing':     all_req_skills - user_set,
-        'matched':     user_set & all_req_skills,
-        'year':        year,
+        'best_job':     best_job,
+        'best_sim':     best_sim,
+        'pred_salary':  pred_salary,
+        'user_set':     user_set,
+        'req_set':      all_req_skills,
+        'missing':      all_req_skills - user_set,
+        'matched':      user_set & all_req_skills,
+        'year':         year,
+        'career_field': matched_domain,
     }
     st.session_state.current_page = return_page
     st.rerun()
@@ -1009,7 +1198,7 @@ def page_salary(df, tfidf, le, salary_model, X_cols, req_matrix):
             user_input = st.text_input(
                 "🧠 Your Skills",
                 value=st.session_state.skills_input,
-                placeholder="e.g. python, machine learning, sql",
+                placeholder=skills_input_placeholder(),
                 key="sal_skills"
             )
             st.session_state.skills_input = user_input
@@ -1026,7 +1215,13 @@ def page_salary(df, tfidf, le, salary_model, X_cols, req_matrix):
         st.info("👆 Enter your skills above and click Predict to see results.")
         return
 
-    res         = st.session_state.result
+    res = st.session_state.result
+    if st.session_state.career_field == DOMAIN_AUTO and res.get("career_field"):
+        st.success(
+            f"**Matched career domain:** {res['career_field']} — "
+            "strongest fit for your skills; salary and forecasts use this industry’s data."
+        )
+
     best_job    = res['best_job']
     best_sim    = res['best_sim']
     pred_salary = res['pred_salary']
@@ -1147,7 +1342,9 @@ def page_salary(df, tfidf, le, salary_model, X_cols, req_matrix):
     st.divider()
 
     st.markdown('<div class="section-header">📄 Download Full Report</div>', unsafe_allow_html=True)
-    years_arr, y_actual, y_pred_fc, future_years, future_postings, fc_acc = forecast_postings(df, best_job)
+    years_arr, y_actual, y_pred_fc, future_years, future_postings, fc_acc = forecast_postings(
+        df, best_job, effective_training_domain()
+    )
     pdf_buf = generate_pdf(best_job, best_sim, pred_salary, user_set, req_set, missing,
                            years_arr, y_actual, y_pred_fc, future_years, future_postings,
                            fc_acc if fc_acc else 0, df)
@@ -1174,7 +1371,9 @@ def page_forecasting(df):
         return
 
     best_job = st.session_state.result['best_job']
-    years_arr, y_actual, y_pred_fc, future_years, future_postings, fc_acc = forecast_postings(df, best_job)
+    years_arr, y_actual, y_pred_fc, future_years, future_postings, fc_acc = forecast_postings(
+        df, best_job, effective_training_domain()
+    )
 
     if years_arr is None:
         st.warning("⚠️ Not enough data to forecast job postings for this role.")
@@ -1225,16 +1424,11 @@ def page_forecasting(df):
 
     st.markdown('<div class="section-header">📊 All Roles — Postings Comparison</div>', unsafe_allow_html=True)
     postings_trend = df.groupby(['year','job_title'])['postings'].mean().reset_index()
-    colors_map = {
-        'AI Researcher':'#a78bfa','ML Engineer':'#60a5fa','Data Scientist':'#34d399',
-        'Full Stack Developer':'#f87171','Backend Developer':'#fbbf24',
-        'Data Analyst':'#fb923c','Frontend Developer':'#e879f9','DevOps Engineer':'#38bdf8',
-    }
     fig_p, ax_p = dark_fig(figsize=(10, 4))
     for job in postings_trend['job_title'].unique():
         job_data = postings_trend[postings_trend['job_title'] == job].sort_values('year')
         ax_p.plot(job_data['year'], job_data['postings'], label=job,
-                  color=colors_map.get(job,'#ffffff'),
+                  color=ROLE_LINE_COLORS.get(job, '#e2e8f0'),
                   linewidth=3.5 if job == best_job else 1.5,
                   alpha=1.0 if job == best_job else 0.4,
                   marker='o' if job == best_job else None, markersize=6)
@@ -1354,9 +1548,10 @@ def page_about(df, salary_accuracy):
         <div class="about-card">
             <h3>🚀 What is CareerLens?</h3>
             <p>CareerLens is an AI-powered career intelligence platform that matches your current skill set
-            to the most relevant job roles in the tech industry, predicts your expected salary, and
+            to the most relevant job roles in your chosen domain, predicts your expected salary, and
             forecasts future job market demand using machine learning models trained on 20,000+ synthetic
-            job records spanning multiple years and 8 major tech roles.</p>
+            job records per domain (CS/AI, Mechanical, Civil, Electrical, ECE, Textile, Medicine, Finance),
+            each spanning multiple years and eight core roles.</p>
             <ul style="margin-top:.6rem">
                 <li>Skill-to-job matching via TF-IDF cosine similarity</li>
                 <li>Salary prediction using XGBoost regression</li>
@@ -1419,8 +1614,9 @@ def page_about(df, salary_accuracy):
         <div class="about-card">
             <h3>🗄️ Data Sources</h3>
             <ul>
-                <li>Synthetic dataset: 20,000 job records</li>
-                <li>8 tech roles: AI Engineer, ML Engineer, Data Scientist, Data Analyst,
+                <li>Synthetic dataset (this domain): {len(df):,} job records — files live under <code>dataset/</code></li>
+                <li>Auto mode: strongest skill match picks the domain; locked domain searches only that CSV</li>
+                <li>Eight roles per domain — CS/AI example: AI Engineer, ML Engineer, Data Scientist, Data Analyst,
                     Frontend Developer, Backend Developer, Full Stack Developer, DevOps Engineer</li>
                 <li>Year range: {int(df['year'].min())}–{int(df['year'].max())}</li>
                 <li>Features: job title, required skills, user skills, salary LPA, job postings, year</li>
@@ -1466,9 +1662,12 @@ def page_about(df, salary_accuracy):
 # MAIN
 # ==============================
 def main():
+    render_career_domain_bar()
     with st.spinner("⚙️ Initializing AI models..."):
         df, tfidf, le, salary_model, X_cols, salary_accuracy, \
-        y_test_actual_eval, y_pred_actual_eval, req_matrix = load_and_train()
+        y_test_actual_eval, y_pred_actual_eval, req_matrix = load_and_train(
+            effective_training_domain()
+        )
 
     render_topnav(st.session_state.current_page)
 
