@@ -503,8 +503,11 @@ difficulty = {
 # ==============================
 # YOUTUBE API KEY
 # ==============================
-YOUTUBE_API_KEY = "AIzaSyDyKgsZu2YM2KnGebfVuec3UJnO4t_yynI"
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
+API_KEY = os.getenv("API_KEY")
 # ==============================
 # get_youtube_resources — curated fallback
 # ==============================
@@ -573,7 +576,7 @@ def get_youtube_resources(skill):
             "q": f"{skill.replace('_', ' ')} tutorial for beginners",
             "type": "video",
             "maxResults": 2,
-            "key": YOUTUBE_API_KEY,
+            "key": API_KEY,
         }
         response = requests.get(url, params=params, timeout=5)
         data = response.json()
