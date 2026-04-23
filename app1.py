@@ -665,8 +665,31 @@ def page_salary(df,tfidf,le,salary_model,X_cols,req_matrix):
 # ======================================================
 def page_forecasting(df):
     st.markdown('<div class="section-label">Job Forecasting</div><h2 class="section-title">5-Year Demand Projection</h2>',unsafe_allow_html=True)
+
+    # ── Skill input panel (mirrors Salary Prediction page) ──────────────────
+    with st.expander("🔄 Enter / Update Skills for Forecast", expanded=(st.session_state.result is None)):
+        st.markdown('<div class="cl-input-panel" style="margin:0">',unsafe_allow_html=True)
+        fa,fb,fc_col,fd=st.columns([1,3,2,1])
+        with fa:
+            fc_yr=st.number_input("Target Year",min_value=2020,max_value=2035,value=2025,key="fc_year")
+        with fb:
+            fc_ui=st.text_input("Your Skills (comma separated)",value=st.session_state.skills_input,placeholder=skills_input_placeholder(),key="fc_skills")
+            st.session_state.skills_input=fc_ui
+        with fc_col:
+            dl=[DOMAIN_AUTO]+CAREER_DOMAINS_ORDERED
+            fc_dom=st.selectbox("Career Domain",dl,index=dl.index(st.session_state.career_field) if st.session_state.career_field in dl else 0,key="fc_domain")
+            if fc_dom!=st.session_state.career_field: st.session_state.career_field=fc_dom; st.rerun()
+        with fd:
+            st.markdown('<div style="padding-top:1.55rem;">',unsafe_allow_html=True)
+            if st.button("Forecast →",use_container_width=True,key="fc_predict"):
+                if not fc_ui.strip(): st.warning("⚠️ Please enter at least one skill.")
+                else: _run_prediction(fc_ui,fc_yr,df,return_page="Job Forecasting")
+            st.markdown('</div>',unsafe_allow_html=True)
+        st.markdown('</div>',unsafe_allow_html=True)
+
     if st.session_state.result is None:
-        st.markdown('<div class="cl-alert warn"><span class="cl-alert-icon">⚠</span> Go to Dashboard, enter your skills, and click Analyze to see forecasts.</div>',unsafe_allow_html=True); return
+        st.markdown('<div class="cl-alert info"><span class="cl-alert-icon">◈</span> Enter your skills above and click Forecast to see demand projections.</div>',unsafe_allow_html=True); return
+
     bj=st.session_state.result['best_job']
     ya,yact,yp,fy,fp,fc=forecast_postings(df,bj,effective_training_domain())
     if ya is None:
@@ -678,7 +701,9 @@ def page_forecasting(df):
     for i,col in enumerate(cols):
         with col:
             up=i==0 or fp[i]>=fp[i-1]
-            st.markdown(f'<div class="cl-metric"><div class="cl-metric-label">📅 {fy[i]}</div><div class="cl-metric-value {"teal" if up else "amber"}">{fp[i]}</div><div class="cl-metric-sub">{"↑" if up else "↓"} avg postings</div></div>',unsafe_allow_html=True)
+            val_color="teal" if up else "amber"
+            arrow="↑" if up else "↓"
+            st.markdown(f'<div class="cl-metric"><div class="cl-metric-label">📅 {fy[i]}</div><div class="cl-metric-value {val_color}">{fp[i]}</div><div class="cl-metric-sub">{arrow} avg postings</div></div>',unsafe_allow_html=True)
 
     # FIX 2 — Forecast chart (Graph 1 of 2)
     st.markdown('<div class="cl-section">Actual vs Predicted vs Forecast</div>',unsafe_allow_html=True)
