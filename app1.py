@@ -12,7 +12,7 @@ import re, random, io
 from matplotlib.backends.backend_pdf import PdfPages
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, normalize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.ensemble import GradientBoostingRegressor
@@ -337,7 +337,8 @@ def load_and_train(career_field="Computer Science & AI"):
     tfidf=TfidfVectorizer(stop_words='english',token_pattern=r"(?u)\b\w+\b")
     tfidf.fit(list(df['skills_required'])+list(df['user_skills']))
     req_matrix=tfidf.transform(df['skills_required']); user_matrix=tfidf.transform(df['user_skills'])
-    df['similarity']=[cosine_similarity(req_matrix[i],user_matrix[i])[0][0] for i in range(len(df))]
+    req_n=normalize(req_matrix,norm="l2",axis=1); user_n=normalize(user_matrix,norm="l2",axis=1)
+    df["similarity"]=np.asarray(req_n.multiply(user_n).sum(axis=1)).ravel()
     bs=CAREER_BASE_SALARY.get(career_field,CAREER_BASE_SALARY["Computer Science & AI"]); db=8 if career_field=="Computer Science & AI" else 6
     df['salary']=[bs.get(df['job_title'].iloc[i],db)+df['similarity'].iloc[i]*15+random.uniform(-0.5,0.5) for i in range(len(df))]
     df['num_user_skills']=df['user_skills'].apply(lambda x:len(clean_split(x)))
@@ -346,12 +347,12 @@ def load_and_train(career_field="Computer Science & AI"):
     le=LabelEncoder(); df['job_encoded']=le.fit_transform(df['job_title'])
     X=df[['year','postings','job_encoded','similarity','num_user_skills','num_required_skills','skill_match_percent']]
     y=np.log1p(df['salary']); Xtr,Xte,ytr,yte=train_test_split(X,y,test_size=0.2,random_state=42)
-    m=XGBRegressor(n_estimators=500,max_depth=8,random_state=42); m.fit(Xtr,ytr)
+    m=XGBRegressor(n_estimators=180,max_depth=6,random_state=42,tree_method="hist",n_jobs=-1); m.fit(Xtr,ytr)
     ya=np.expm1(yte); yp=np.expm1(m.predict(Xte))
     acc=round((np.sum(np.abs(ya-yp)<=0.1*ya)/len(ya))*100,2)
     return df,tfidf,le,m,X,acc,ya,yp,req_matrix
 
-def forecast_postings(df,best_job,career_field="Computer Science & AI"):
+def _forecast_postings_compute(df,best_job,career_field="Computer Science & AI"):
     jy=df[df['job_title']==best_job].groupby('year')['postings'].mean().reset_index().sort_values('year').reset_index(drop=True)
     jy['postings']=jy['postings'].round().astype(int); np.random.seed(42)
     base=jy['postings'].values; jl=best_job.lower()
@@ -363,13 +364,21 @@ def forecast_postings(df,best_job,career_field="Computer Science & AI"):
     if len(jy)<3: return None,None,None,None,None,None
     jy['trend_idx']=range(len(jy)); jy['year_sq']=jy['year']**2
     Xfc=jy[['year','trend_idx','year_sq','lag1','lag2','rolling_mean']].values; yfc=jy['postings'].values; ya=jy['year'].values
-    mo=GradientBoostingRegressor(n_estimators=500,max_depth=3,learning_rate=0.05,subsample=0.8); mo.fit(Xfc,yfc)
+    mo=GradientBoostingRegressor(n_estimators=120,max_depth=3,learning_rate=0.08,subsample=0.8); mo.fit(Xfc,yfc)
     yp=mo.predict(Xfc); acc=(np.sum(np.abs(yfc-yp)<=0.01*yfc)/len(yfc))*100
     fy=[int(ya[-1])+i for i in range(1,6)]; fp=[]; lv=list(jy['postings'].values); mt=len(jy)-1
     for i,yr in enumerate(fy):
         l1=lv[-1]; l2=lv[-2]; row=np.array([[yr,mt+i+1,yr**2,l1,l2,(l1+l2)/2]])
         pred=round(mo.predict(row)[0]); fp.append(pred); lv.append(pred)
     return ya,yfc,yp,fy,fp,acc
+
+@st.cache_data(show_spinner=False)
+def _forecast_postings_cached(career_field: str, best_job: str):
+    df, *_ = load_and_train(career_field)
+    return _forecast_postings_compute(df, best_job, career_field)
+
+def forecast_postings(df,best_job,career_field="Computer Science & AI"):
+    return _forecast_postings_cached(career_field, best_job)
 
 # ======================================================
 # PLOT HELPERS — always close figure after st.pyplot()
@@ -836,14 +845,14 @@ def page_about(df,salary_accuracy):
     st.markdown('<div class="section-label">System Intelligence</div><h2 class="section-title">Architecture, Methodology &amp; Data</h2><p class="section-sub">Every technical decision behind CareerLens — transparent, reproducible, built for accuracy</p>',unsafe_allow_html=True)
 
     st.markdown('<div class="cl-section">Platform Capabilities</div>',unsafe_allow_html=True)
-    features=[("🎯","Smart Job Matching","TF-IDF cosine similarity finds your best-fit role across 8 domains and 20K+ records instantly."),("💰","Salary Prediction","XGBoost with 500 trees predicts your expected LPA with ±10% tolerance for any target year."),("📈","Market Forecast","Gradient Boosting with lag features projects job posting demand 5 years ahead per role."),("🧩","Skill Gap Analysis","Set-theoretic diff between your skills and role requirements — ranked by learning ROI."),("📄","PDF Career Report","One-click auto-generated report with match summary, salary benchmark, and forecast charts."),("⚡","8 Career Domains","CS/AI · Mechanical · Civil · Electrical · ECE · Textile · Medicine · Finance all covered.")]
+    features=[("🎯","Smart Job Matching","TF-IDF cosine similarity finds your best-fit role across 8 domains and 20K+ records instantly."),("💰","Salary Prediction","XGBoost (histogram, ~180 trees) predicts your expected LPA with ±10% tolerance for any target year."),("📈","Market Forecast","Gradient Boosting with lag features projects job posting demand 5 years ahead per role."),("🧩","Skill Gap Analysis","Set-theoretic diff between your skills and role requirements — ranked by learning ROI."),("📄","PDF Career Report","One-click auto-generated report with match summary, salary benchmark, and forecast charts."),("⚡","8 Career Domains","CS/AI · Mechanical · Civil · Electrical · ECE · Textile · Medicine · Finance all covered.")]
     for i in range(0,len(features),2):
         c1,c2=st.columns(2)
         for col,(icon,title,desc) in zip([c1,c2],features[i:i+2]):
             with col: st.markdown(f'<div class="cl-feature"><div class="cl-feature-icon">{icon}</div><div class="cl-feature-title">{title}</div><div class="cl-feature-desc">{desc}</div></div>',unsafe_allow_html=True)
 
     st.markdown('<div class="cl-section">Five Steps from Skills to Insight</div>',unsafe_allow_html=True)
-    steps=[("01","Normalize","Abbreviations expand, text lowercases, special chars stripped."),("02","Vectorize","TF-IDF transforms skills into high-dimensional numeric vectors."),("03","Match","Cosine similarity scores your vector against every job profile."),("04","Predict","XGBoost with 500 trees predicts your log-transformed salary."),("05","Forecast","Gradient Boosting projects job demand 5 years forward with lag features.")]
+    steps=[("01","Normalize","Abbreviations expand, text lowercases, special chars stripped."),("02","Vectorize","TF-IDF transforms skills into high-dimensional numeric vectors."),("03","Match","Cosine similarity scores your vector against every job profile."),("04","Predict","XGBoost (fast histogram training) predicts your log-transformed salary."),("05","Forecast","Gradient Boosting projects job demand 5 years forward with lag features.")]
     cols=st.columns(5)
     for i,(num,title,body) in enumerate(steps):
         with cols[i]: st.markdown(f'<div class="step-card"><div class="step-number">{num}</div><div style="font-family:\'Bricolage Grotesque\',sans-serif;font-weight:700;color:#f0f3ff;margin-bottom:0.4rem;">{title}</div><div style="font-size:0.75rem;color:#8e9abf;line-height:1.65;">{body}</div></div>',unsafe_allow_html=True)
@@ -868,7 +877,7 @@ def page_about(df,salary_accuracy):
         st.markdown(f"""<div class="about-card"><div class="about-card-title">🤖 ML Models</div>
         <table class="about-table"><thead><tr><th>Metric</th><th>Salary Model</th><th>Forecast Model</th></tr></thead><tbody>
         <tr><td class="label">Algorithm</td><td class="val-pink">XGBRegressor</td><td class="val-cyan">GradientBoostingRegressor</td></tr>
-        <tr><td class="label">Estimators</td><td class="val-text">500 trees</td><td class="val-text">500 trees</td></tr>
+        <tr><td class="label">Estimators</td><td class="val-text">~180 trees</td><td class="val-text">~120 trees</td></tr>
         <tr><td class="label">Max Depth</td><td class="val-text">8</td><td class="val-text">3</td></tr>
         <tr><td class="label">Accuracy</td><td class="val-green">{salary_accuracy}% (±10%)</td><td class="val-green">Per-role reported</td></tr>
         </tbody></table></div>""",unsafe_allow_html=True)
@@ -910,10 +919,15 @@ def main():
 
     render_topbar()
 
-    with st.spinner("⚙️ Initialising intelligence modules…"):
-        df,tfidf,le,salary_model,X_cols,salary_accuracy,_,_,req_matrix = load_and_train(effective_training_domain())
-
     page = st.session_state.current_page
+    skip_heavy_load = page == "Job Forecasting" and st.session_state.result is None
+    if not skip_heavy_load:
+        with st.spinner("⚙️ Initialising intelligence modules…"):
+            df,tfidf,le,salary_model,X_cols,salary_accuracy,_,_,req_matrix = load_and_train(effective_training_domain())
+    else:
+        df=tfidf=le=salary_model=X_cols=req_matrix=None
+        salary_accuracy=0
+
     if   page == "Dashboard":          page_dashboard(df, salary_accuracy)
     elif page == "Salary Prediction":  page_salary(df, tfidf, le, salary_model, X_cols, req_matrix)
     elif page == "Job Forecasting":    page_forecasting(df)
