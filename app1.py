@@ -8,7 +8,8 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import re, io
+import re, io, sys, joblib
+from pathlib import Path
 from matplotlib.backends.backend_pdf import PdfPages
 
 from sklearn.model_selection import train_test_split
@@ -237,6 +238,16 @@ CAREER_FIELD_FILES = {
     "Finance":"dataset/finance.csv",
 }
 CAREER_DOMAINS_ORDERED = list(CAREER_FIELD_FILES.keys())
+ML_ARTIFACT_VERSION = 2
+_ARTIFACT_DIR = Path(__file__).resolve().parent / "artifacts"
+
+def _ml_artifact_path(career_field):
+    slug = career_field.lower().replace("&", "and").replace(" ", "_")
+    slug = "".join(c if c.isalnum() or c == "_" else "_" for c in slug)
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return _ARTIFACT_DIR / f"bundle_v{ML_ARTIFACT_VERSION}_{slug}.joblib"
+
 AUTO_DOMAIN_TIEBREAK = {"Civil Engineering":8,"Mechanical Engineering":7,"Electrical Engineering":6,"Electronics & Communication Engineering":5,"Textile":4,"Medicine":3,"Finance":2,"Computer Science & AI":1}
 if "career_field" not in st.session_state: st.session_state.career_field = DOMAIN_AUTO
 elif st.session_state.career_field not in [DOMAIN_AUTO]+CAREER_DOMAINS_ORDERED: st.session_state.career_field = DOMAIN_AUTO
@@ -344,8 +355,8 @@ def _tfidf_req_bundle(career_field="Computer Science & AI"):
     req_matrix=tfidf.transform(df["skills_required"])
     return df,tfidf,req_matrix
 
-@st.cache_resource
-def load_and_train(career_field="Computer Science & AI"):
+def _compute_ml_bundle(career_field="Computer Science & AI"):
+    """Train full salary pipeline (used when no joblib artifact is present)."""
     df,tfidf,req_matrix=_tfidf_req_bundle(career_field)
     df=df.copy()
     user_matrix=tfidf.transform(df["user_skills"])
@@ -353,7 +364,8 @@ def load_and_train(career_field="Computer Science & AI"):
     df["similarity"]=np.asarray(req_n.multiply(user_n).sum(axis=1)).ravel()
     bs=CAREER_BASE_SALARY.get(career_field,CAREER_BASE_SALARY["Computer Science & AI"]); db=8 if career_field=="Computer Science & AI" else 6
     base_sal=np.asarray(df["job_title"].map(bs).fillna(db),dtype=np.float64)+df["similarity"].to_numpy(dtype=np.float64)*15.0
-    rng=np.random.default_rng(abs(hash(career_field))%2**32)
+    rng_seed=42+CAREER_DOMAINS_ORDERED.index(career_field) if career_field in CAREER_DOMAINS_ORDERED else 42
+    rng=np.random.default_rng(rng_seed)
     df["salary"]=base_sal+rng.uniform(-0.5,0.5,size=len(df))
     df['num_user_skills']=df['user_skills'].apply(lambda x:len(clean_split(x)))
     df['num_required_skills']=df['skills_required'].apply(lambda x:len(clean_split(x)))
@@ -368,6 +380,13 @@ def load_and_train(career_field="Computer Science & AI"):
     ya=np.expm1(yte); yp=np.expm1(m.predict(Xte))
     acc=round((np.sum(np.abs(ya-yp)<=0.1*ya)/len(ya))*100,2)
     return df,tfidf,le,m,X,acc,ya,yp,req_matrix
+
+@st.cache_resource
+def load_and_train(career_field="Computer Science & AI"):
+    path=_ml_artifact_path(career_field)
+    if path.is_file():
+        return joblib.load(path)
+    return _compute_ml_bundle(career_field)
 
 def _forecast_postings_compute(df,best_job,career_field="Computer Science & AI"):
     jy=df[df['job_title']==best_job].groupby('year')['postings'].mean().reset_index().sort_values('year').reset_index(drop=True)
@@ -958,5 +977,17 @@ def main():
     if page != "About":
         st.markdown('<div class="footer">CareerLens AI System v2.5 · XGBoost + Gradient Boosting · © 2025</div>', unsafe_allow_html=True)
 
+def _cli_build_ml_artifacts():
+    """Write joblib bundles under artifacts/ (run: python app1.py --build-ml-artifacts)."""
+    _ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    for domain in CAREER_DOMAINS_ORDERED:
+        p = _ml_artifact_path(domain)
+        out = _compute_ml_bundle(domain)
+        joblib.dump(out, p, compress=3)
+        print("Wrote", p, "rows", len(out[0]))
+
 if __name__ == "__main__":
-    main()
+    if "--build-ml-artifacts" in sys.argv:
+        _cli_build_ml_artifacts()
+    else:
+        main()
