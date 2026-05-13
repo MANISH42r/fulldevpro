@@ -328,14 +328,27 @@ def generate_roadmap(missing,user_set):
 # LOAD & TRAIN
 # ======================================================
 @st.cache_resource
-def load_and_train(career_field="Computer Science & AI"):
-    df = pd.read_csv(CAREER_FIELD_FILES.get(career_field,CAREER_FIELD_FILES["Computer Science & AI"]))
+def _preprocessed_domain_df(career_field="Computer Science & AI"):
+    df=pd.read_csv(CAREER_FIELD_FILES.get(career_field,CAREER_FIELD_FILES["Computer Science & AI"]))
     df.rename(columns={"Job_Name":"job_title","Required_Skills":"skills_required","User_Learned_Skills":"user_skills","Avg_Salary_LPA":"salary","Job_Postings":"postings","Year":"year"},inplace=True)
-    df['skills_required']=df['skills_required'].apply(normalize_text).apply(standardize_skills)
-    df['user_skills']=df['user_skills'].apply(normalize_text).apply(standardize_skills)
-    tfidf=TfidfVectorizer(stop_words='english',token_pattern=r"(?u)\b\w+\b")
-    tfidf.fit(list(df['skills_required'])+list(df['user_skills']))
-    req_matrix=tfidf.transform(df['skills_required']); user_matrix=tfidf.transform(df['user_skills'])
+    df["skills_required"]=df["skills_required"].apply(normalize_text).apply(standardize_skills)
+    df["user_skills"]=df["user_skills"].apply(normalize_text).apply(standardize_skills)
+    return df
+
+@st.cache_resource
+def _tfidf_req_bundle(career_field="Computer Science & AI"):
+    """TF-IDF + required-skills matrix only (no XGB). Used for Auto-domain scan — avoids 8× full training."""
+    df=_preprocessed_domain_df(career_field)
+    tfidf=TfidfVectorizer(stop_words="english",token_pattern=r"(?u)\b\w+\b")
+    tfidf.fit(list(df["skills_required"])+list(df["user_skills"]))
+    req_matrix=tfidf.transform(df["skills_required"])
+    return df,tfidf,req_matrix
+
+@st.cache_resource
+def load_and_train(career_field="Computer Science & AI"):
+    df,tfidf,req_matrix=_tfidf_req_bundle(career_field)
+    df=df.copy()
+    user_matrix=tfidf.transform(df["user_skills"])
     req_n=normalize(req_matrix,norm="l2",axis=1); user_n=normalize(user_matrix,norm="l2",axis=1)
     df["similarity"]=np.asarray(req_n.multiply(user_n).sum(axis=1)).ravel()
     bs=CAREER_BASE_SALARY.get(career_field,CAREER_BASE_SALARY["Computer Science & AI"]); db=8 if career_field=="Computer Science & AI" else 6
@@ -463,15 +476,17 @@ def _run_prediction(user_input,year,df=None,tfidf=None,le=None,salary_model=None
     uic=standardize_skills(normalize_text(user_input))
     with st.spinner("🔍 Scanning skill database…"):
         if st.session_state.career_field==DOMAIN_AUTO:
-            bk=None; bp=None
+            bk=None; best_domain=None; best_bi=None
             for domain in CAREER_DOMAINS_ORDERED:
-                ddf,dt,dl,dm,dX,_,_,_,dr=load_and_train(domain)
+                ddf,dt,dr=_tfidf_req_bundle(domain)
                 qv=normalize(dt.transform([uic]),norm="l2",axis=1); dr_n=normalize(dr,norm="l2",axis=1)
                 sims=(qv@dr_n.T).toarray().ravel()
                 bi=int(np.argmax(sims)); bs_=float(sims[bi]); key=(bs_,AUTO_DOMAIN_TIEBREAK.get(domain,0))
-                if bk is None or key>bk: bk=key; bp=(domain,bi,ddf,dt,dl,dm,dX,dr)
-            if bp is None: st.error("❌ Could not load career datasets."); return
-            md,best_idx,df,tfidf,le,salary_model,X_cols,req_matrix=bp; best_sim=float(bk[0]); best_job=df['job_title'].iloc[best_idx]
+                if bk is None or key>bk: bk=key; best_domain=domain; best_bi=bi
+            if best_domain is None: st.error("❌ Could not load career datasets."); return
+            md=best_domain
+            df,tfidf,le,salary_model,X_cols,_,_,_,req_matrix=load_and_train(md)
+            best_idx=best_bi; best_sim=float(bk[0]); best_job=df["job_title"].iloc[best_idx]
         else:
             md=st.session_state.career_field
             if tfidf is None: df,tfidf,le,salary_model,X_cols,_,_,_,req_matrix=load_and_train(md)
